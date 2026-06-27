@@ -135,8 +135,13 @@ lib/
   SQL GROUP BY — needed for live "now" + paused subtraction. Grouping toggles
   between Project→Task and Person→Project.
 - **PDF**: `Printing.sharePdf` (Android share / Windows save) and
-  `Printing.layoutPdf` (print preview). Built-in Helvetica font is Latin-only —
-  bundle a NotoSans TTF if non-Latin (e.g. Bengali) names must render.
+  `Printing.layoutPdf` (print preview). Fonts: `PdfGoogleFonts` fetches Noto Sans
+  + Noto Sans Bengali at build time (full Unicode incl. Bengali) **when online**;
+  offline it falls back to built-in Helvetica (Latin only). Keep PDF text ASCII
+  where possible (e.g. use `-` not `–`) so the offline fallback never throws on a
+  missing glyph. Export is wrapped in `guard()` so any failure shows a dialog.
+  Avoid `borderRadius` on one-sided borders and `CrossAxisAlignment.stretch`
+  rows in `MultiPage` (causes infinite-height layout errors).
 - **WhatsApp open** (`_openWhatsApp`): `whatsapp://send` first (app/desktop),
   `wa.me` browser fallback.
 

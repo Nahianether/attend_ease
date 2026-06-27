@@ -13,16 +13,39 @@ class PdfReportService {
   PdfColor _colorOf(ReportNode n) =>
       n.color != null ? PdfColor.fromInt(n.color!) : PdfColors.blueGrey400;
 
+  /// Loads a Unicode-capable font theme (Noto Sans + Bengali fallback). Falls
+  /// back to the built-in font if the fonts can't be fetched (e.g. offline) —
+  /// in that case only Latin text renders.
+  Future<pw.ThemeData?> _loadTheme() async {
+    try {
+      final regular = await PdfGoogleFonts.notoSansRegular();
+      final bold = await PdfGoogleFonts.notoSansBold();
+      final fallback = <pw.Font>[];
+      try {
+        fallback.add(await PdfGoogleFonts.notoSansBengaliRegular());
+      } catch (_) {/* Bengali optional */}
+      return pw.ThemeData.withFont(
+        base: regular,
+        bold: bold,
+        fontFallback: fallback,
+      );
+    } catch (_) {
+      return null; // offline / fetch failed — use built-in Helvetica
+    }
+  }
+
   Future<pw.Document> build({
     required String title,
     required DateRange range,
     required List<ReportNode> nodes,
     required Duration total,
   }) async {
-    final doc = pw.Document();
+    final theme = await _loadTheme();
+    final doc = pw.Document(theme: theme);
     final dateFmt = DateFormat('dd MMM yyyy');
+    // ASCII hyphen (the en-dash isn't in the built-in font).
     final rangeText =
-        '${dateFmt.format(range.start)} – ${dateFmt.format(range.end.subtract(const Duration(days: 1)))}';
+        '${dateFmt.format(range.start)} - ${dateFmt.format(range.end.subtract(const Duration(days: 1)))}';
     final totalMs = total.inMilliseconds == 0 ? 1 : total.inMilliseconds;
 
     String pct(Duration d) =>
@@ -112,25 +135,25 @@ class PdfReportService {
       ReportNode project, int totalMs, String Function(Duration) pct) {
     final color = _colorOf(project);
     final fraction = project.total.inMilliseconds / totalMs;
+    // Rounded grey card (uniform decoration — pdf forbids borderRadius on a
+    // one-sided border, and a stretched stripe blows up height in MultiPage).
     return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 14),
-      padding: const pw.EdgeInsets.all(10),
+      margin: const pw.EdgeInsets.only(bottom: 12),
+      padding: const pw.EdgeInsets.all(12),
       decoration: pw.BoxDecoration(
         color: PdfColors.grey100,
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-        border: pw.Border(left: pw.BorderSide(color: color, width: 4)),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // Project header row
           pw.Row(
             children: [
               pw.Container(
                 width: 12,
                 height: 12,
-                decoration: pw.BoxDecoration(
-                    color: color, shape: pw.BoxShape.circle),
+                decoration:
+                    pw.BoxDecoration(color: color, shape: pw.BoxShape.circle),
               ),
               pw.SizedBox(width: 8),
               pw.Expanded(
@@ -150,7 +173,6 @@ class PdfReportService {
           pw.SizedBox(height: 6),
           _bar(fraction, color),
           pw.SizedBox(height: 8),
-          // Task rows
           ...project.children.map((t) {
             final tFrac = project.total.inMilliseconds == 0
                 ? 0.0
@@ -159,16 +181,12 @@ class PdfReportService {
               padding: const pw.EdgeInsets.symmetric(vertical: 3),
               child: pw.Row(
                 children: [
-                  pw.Container(width: 14),
                   pw.Expanded(
                     flex: 5,
                     child: pw.Text(t.label,
                         style: const pw.TextStyle(fontSize: 10)),
                   ),
-                  pw.Expanded(
-                    flex: 4,
-                    child: _bar(tFrac, color, height: 5),
-                  ),
+                  pw.Expanded(flex: 4, child: _bar(tFrac, color, height: 5)),
                   pw.SizedBox(width: 10),
                   pw.SizedBox(
                     width: 60,
