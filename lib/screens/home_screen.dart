@@ -108,17 +108,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             description: sel.description,
           );
       ref.invalidate(todayTotalsProvider);
-      final result = await ref.read(notificationServiceProvider).notify(
-            settings: ref.read(settingsProvider).asData?.value ??
-                const AppSettings(),
-            person: name,
+      final settings =
+          ref.read(settingsProvider).asData?.value ?? const AppSettings();
+      var result = const NotifyResult();
+      if (settings.notifyWhatsApp) {
+        result = await ref.read(notificationServiceProvider).notify(
+              settings: settings,
+              person: name,
+              isCheckIn: true,
+              when: entry.start,
+              projectName: await _projectName(entry.projectId),
+              taskName: entry.taskName,
+              description: sel.description,
+            );
+      }
+      if (mounted) {
+        _showOutcome(
+            name: name,
             isCheckIn: true,
-            when: entry.start,
-            projectName: await _projectName(entry.projectId),
-            taskName: entry.taskName,
-            description: sel.description,
-          );
-      if (mounted) _showOutcome(name: name, isCheckIn: true, res: result);
+            res: result,
+            notifyEnabled: settings.notifyWhatsApp);
+      }
     } catch (e) {
       if (mounted) {
         await showAppError(context, title: 'Could not check in', error: e);
@@ -137,22 +147,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.invalidate(historyProvider);
       ref.invalidate(reportEntriesProvider);
       final entry = result.entry;
-      final notif = await ref.read(notificationServiceProvider).notify(
-            settings: ref.read(settingsProvider).asData?.value ??
-                const AppSettings(),
-            person: entry.person,
-            isCheckIn: false,
-            when: entry.end!,
-            projectName: await _projectName(entry.projectId),
-            taskName: entry.taskName,
-            description: entry.description,
-          );
+      final settings =
+          ref.read(settingsProvider).asData?.value ?? const AppSettings();
+      var notif = const NotifyResult();
+      if (settings.notifyWhatsApp) {
+        notif = await ref.read(notificationServiceProvider).notify(
+              settings: settings,
+              person: entry.person,
+              isCheckIn: false,
+              when: entry.end!,
+              projectName: await _projectName(entry.projectId),
+              taskName: entry.taskName,
+              description: entry.description,
+            );
+      }
       if (mounted) {
         _showOutcome(
             name: entry.person,
             isCheckIn: false,
             res: notif,
-            worked: result.worked);
+            worked: result.worked,
+            notifyEnabled: settings.notifyWhatsApp);
       }
     } catch (e) {
       if (mounted) {
@@ -172,11 +187,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       {required String name,
       required bool isCheckIn,
       required NotifyResult res,
+      required bool notifyEnabled,
       Duration? worked}) {
     final action = isCheckIn ? 'Checked in' : 'Checked out';
     final lines = <String>['$action: $name'];
     if (worked != null) lines.add('Worked: ${formatHms(worked)}');
-    if (res.whatsAppConfigured) {
+    if (!notifyEnabled) {
+      lines.add('• WhatsApp notification is off');
+    } else if (res.whatsAppConfigured) {
       lines.add(res.whatsAppOpened
           ? '✓ WhatsApp opened — tap Send'
           : '✗ Could not open WhatsApp');

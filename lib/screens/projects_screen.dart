@@ -16,6 +16,14 @@ const kProjectColors = <Color>[
   Color(0xFFD64550), // red
   Color(0xFF8E44AD), // purple
   Color(0xFF5D6D7E), // slate
+  Color(0xFFEC407A), // pink
+  Color(0xFF7E57C2), // deep purple
+  Color(0xFF26A69A), // sea green
+  Color(0xFF42A5F5), // sky blue
+  Color(0xFF8D6E63), // brown
+  Color(0xFFC0CA33), // lime
+  Color(0xFFFF7043), // deep orange
+  Color(0xFF5C6BC0), // indigo
 ];
 
 class ProjectsScreen extends ConsumerWidget {
@@ -90,12 +98,17 @@ class ProjectsScreen extends ConsumerWidget {
                 .read(showArchivedProjectsProvider.notifier)
                 .state = !showArchived,
           ),
+          IconButton(
+            tooltip: 'Add project',
+            icon: const Icon(Icons.add),
+            onPressed: () => _edit(context, ref),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         onPressed: () => _edit(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('Project'),
+        tooltip: 'Add project',
+        child: const Icon(Icons.add),
       ),
       body: projectsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -114,6 +127,7 @@ class ProjectsScreen extends ConsumerWidget {
             );
           }
           return ListView.separated(
+            padding: const EdgeInsets.only(bottom: 88),
             itemCount: projects.length,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, i) {

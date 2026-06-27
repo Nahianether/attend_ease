@@ -28,12 +28,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     try {
-      // Preserve the theme (changed live via its own control).
+      // Preserve toggles that are changed live via their own controls.
       final current = ref.read(settingsProvider).asData?.value;
       await ref.read(settingsProvider.notifier).save(AppSettings(
             defaultUserName: _name.text.trim(),
             managerWhatsApp: _managerWhatsApp.text.trim(),
             themeMode: current?.themeMode ?? 'system',
+            notifyWhatsApp: current?.notifyWhatsApp ?? true,
           ));
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -102,6 +103,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   'Digits only, including country code. On check-in/out, '
                   'WhatsApp opens pre-filled — you tap Send.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Notify manager on WhatsApp'),
+                  subtitle: const Text(
+                      'When off, START/STOP won\'t open WhatsApp.'),
+                  value: s.notifyWhatsApp,
+                  onChanged: (v) =>
+                      ref.read(settingsProvider.notifier).setNotifyWhatsApp(v),
                 ),
                 const SizedBox(height: 24),
                 _section('Appearance'),

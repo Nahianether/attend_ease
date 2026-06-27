@@ -39,6 +39,11 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
     final cur = state.asData?.value ?? const AppSettings();
     await save(cur.copyWith(themeMode: mode));
   }
+
+  Future<void> setNotifyWhatsApp(bool on) async {
+    final cur = state.asData?.value ?? const AppSettings();
+    await save(cur.copyWith(notifyWhatsApp: on));
+  }
 }
 
 final settingsProvider =

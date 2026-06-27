@@ -92,6 +92,19 @@ lib/
     settings_screen.dart          Your name + manager WhatsApp
 ```
 
+## Settings & History extras
+- **Notify toggle**: `AppSettings.notifyWhatsApp` (default true). Settings has a
+  switch (`SettingsNotifier.setNotifyWhatsApp`, live). Home only calls
+  `notify()` when it's on; the outcome dialog shows "WhatsApp notification is off"
+  otherwise. `_save` must preserve it (like `themeMode`).
+- **History delete**: per-row via the trailing ⋮ menu (Edit/Delete, confirmed),
+  plus **multi-select** — long-press a row to enter selection (`_selectionProvider`,
+  a `Set<int>` of entry ids), tap to toggle, app bar shows count + select-all +
+  delete (confirmed). All deletes go through `guard()` + `refreshEntryData`.
+- **Add buttons** are consistent: Projects & History both use a round FAB + an
+  app-bar "+".
+- **Project colours**: `kProjectColors` in `projects_screen.dart` (16 swatches).
+
 ## Theming
 - Light / Dark / **System** (default) — persisted in settings (`AppSettings.themeMode`,
   string `'system'|'light'|'dark'`). `themeModeProvider` derives the `ThemeMode`;
