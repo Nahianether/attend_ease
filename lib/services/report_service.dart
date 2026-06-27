@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 import '../models/time_entry.dart';
 
 enum DateRangePreset {
@@ -76,6 +78,57 @@ Duration grandTotal(List<TimeEntryView> rows, DateTime now) => rows.fold(
       Duration.zero,
       (acc, v) => acc + v.entry.worked(now),
     );
+
+/// A labelled time bucket for the report bar chart.
+class TimeBucket {
+  final String label;
+  final Duration total;
+  const TimeBucket(this.label, this.total);
+}
+
+/// Splits [rows] into ordered buckets across [range] for the bar chart: one bar
+/// per day for short ranges (≤ 45 days), otherwise one per month. Empty buckets
+/// are included so the timeline stays continuous.
+List<TimeBucket> timeBuckets(
+    List<TimeEntryView> rows, DateRange range, DateTime now) {
+  final spanDays = range.end.difference(range.start).inDays;
+  final byMonth = spanDays > 45;
+  final keys = <String>[];
+  final labels = <String, String>{};
+  final totals = <String, Duration>{};
+
+  void add(String key, String label) {
+    keys.add(key);
+    labels[key] = label;
+    totals[key] = Duration.zero;
+  }
+
+  if (byMonth) {
+    final lastDay = range.end.subtract(const Duration(days: 1));
+    var m = DateTime(range.start.year, range.start.month);
+    final endM = DateTime(lastDay.year, lastDay.month);
+    while (!m.isAfter(endM)) {
+      add('${m.year}-${m.month}', DateFormat('MMM').format(m));
+      m = DateTime(m.year, m.month + 1);
+    }
+  } else {
+    var d = DateTime(range.start.year, range.start.month, range.start.day);
+    while (d.isBefore(range.end)) {
+      add('${d.year}-${d.month}-${d.day}', DateFormat('d').format(d));
+      d = d.add(const Duration(days: 1));
+    }
+  }
+
+  for (final v in rows) {
+    final s = v.entry.start;
+    final key =
+        byMonth ? '${s.year}-${s.month}' : '${s.year}-${s.month}-${s.day}';
+    final cur = totals[key];
+    if (cur != null) totals[key] = cur + v.entry.worked(now);
+  }
+
+  return keys.map((k) => TimeBucket(labels[k]!, totals[k]!)).toList();
+}
 
 /// Groups entries by Project → Task, each with subtotals, sorted by time desc.
 List<ReportNode> summaryByProjectTask(List<TimeEntryView> rows, DateTime now) {

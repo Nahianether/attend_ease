@@ -69,10 +69,12 @@ class ReportsScreen extends ConsumerWidget {
     );
     if (choice == null || !context.mounted) return;
     await guard(context, () async {
+      final range = ref.read(reportRangeProvider);
       final doc = await pdf.build(
         title: 'Time Report',
-        range: ref.read(reportRangeProvider),
+        range: range,
         nodes: summaryByProjectTask(rows, now),
+        daily: timeBuckets(rows, range, now),
         total: grandTotal(rows, now),
       );
       if (choice == 'share') {

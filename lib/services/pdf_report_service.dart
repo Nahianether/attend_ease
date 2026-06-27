@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -13,24 +14,23 @@ class PdfReportService {
   PdfColor _colorOf(ReportNode n) =>
       n.color != null ? PdfColor.fromInt(n.color!) : PdfColors.blueGrey400;
 
-  /// Loads a Unicode-capable font theme (Noto Sans + Bengali fallback). Falls
-  /// back to the built-in font if the fonts can't be fetched (e.g. offline) —
-  /// in that case only Latin text renders.
+  /// Loads the bundled Noto fonts (Latin + Bengali) for full offline Unicode.
+  /// Falls back to the built-in font if the assets can't be read.
   Future<pw.ThemeData?> _loadTheme() async {
     try {
-      final regular = await PdfGoogleFonts.notoSansRegular();
-      final bold = await PdfGoogleFonts.notoSansBold();
-      final fallback = <pw.Font>[];
-      try {
-        fallback.add(await PdfGoogleFonts.notoSansBengaliRegular());
-      } catch (_) {/* Bengali optional */}
+      final regular =
+          pw.Font.ttf(await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'));
+      final bold =
+          pw.Font.ttf(await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'));
+      final bengali = pw.Font.ttf(
+          await rootBundle.load('assets/fonts/NotoSansBengali-Regular.ttf'));
       return pw.ThemeData.withFont(
         base: regular,
         bold: bold,
-        fontFallback: fallback,
+        fontFallback: [bengali],
       );
     } catch (_) {
-      return null; // offline / fetch failed — use built-in Helvetica
+      return null;
     }
   }
 
@@ -38,15 +38,16 @@ class PdfReportService {
     required String title,
     required DateRange range,
     required List<ReportNode> nodes,
+    required List<TimeBucket> daily,
     required Duration total,
   }) async {
     final theme = await _loadTheme();
     final doc = pw.Document(theme: theme);
     final dateFmt = DateFormat('dd MMM yyyy');
-    // ASCII hyphen (the en-dash isn't in the built-in font).
     final rangeText =
         '${dateFmt.format(range.start)} - ${dateFmt.format(range.end.subtract(const Duration(days: 1)))}';
     final totalMs = total.inMilliseconds == 0 ? 1 : total.inMilliseconds;
+    final visible = nodes.where((n) => n.total.inSeconds > 0).toList();
 
     String pct(Duration d) =>
         '${(d.inMilliseconds / totalMs * 100).round()}%';
@@ -56,74 +57,37 @@ class PdfReportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
         build: (context) => [
-          // ---- Header band ----
-          pw.Container(
-            width: double.infinity,
-            padding: const pw.EdgeInsets.all(16),
-            decoration: const pw.BoxDecoration(
-              color: _brand,
-              borderRadius: pw.BorderRadius.all(pw.Radius.circular(10)),
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
+          _header(title, rangeText, total),
+          pw.SizedBox(height: 18),
+          if (daily.isNotEmpty) ...[
+            _sectionTitle('Daily activity'),
+            pw.SizedBox(height: 8),
+            _barChart(daily),
+            pw.SizedBox(height: 20),
+          ],
+          if (visible.isNotEmpty) ...[
+            _sectionTitle('Projects'),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(title,
-                        style: pw.TextStyle(
-                            color: PdfColors.white,
-                            fontSize: 20,
-                            fontWeight: pw.FontWeight.bold)),
-                    pw.Text(rangeText,
-                        style: const pw.TextStyle(
-                            color: PdfColors.white, fontSize: 11)),
-                  ],
-                ),
-                pw.SizedBox(height: 10),
-                pw.Text(formatHm(total),
-                    style: pw.TextStyle(
-                        color: PdfColors.white,
-                        fontSize: 30,
-                        fontWeight: pw.FontWeight.bold)),
-                pw.Text('Total tracked',
-                    style: const pw.TextStyle(
-                        color: PdfColors.white, fontSize: 10)),
+                _pie(visible),
+                pw.SizedBox(width: 20),
+                pw.Expanded(child: _legend(visible, pct)),
               ],
             ),
-          ),
-          pw.SizedBox(height: 16),
-
-          // ---- Stacked total bar (per project) ----
-          if (nodes.isNotEmpty) ...[
-            pw.ClipRRect(
-              horizontalRadius: 6,
-              verticalRadius: 6,
-              child: pw.Row(
-                children: nodes
-                    .map((n) => pw.Expanded(
-                          flex: n.total.inSeconds <= 0 ? 1 : n.total.inSeconds,
-                          child: pw.Container(height: 16, color: _colorOf(n)),
-                        ))
-                    .toList(),
-              ),
-            ),
-            pw.SizedBox(height: 16),
+            pw.SizedBox(height: 22),
+            _sectionTitle('Breakdown'),
+            pw.SizedBox(height: 8),
+            ...visible.map((p) => _projectBlock(p, totalMs, pct)),
           ],
-
-          // ---- Per-project breakdown ----
-          ...nodes.map((p) => _projectBlock(p, totalMs, pct)),
-
           pw.SizedBox(height: 8),
           pw.Divider(),
           pw.Container(
             alignment: pw.Alignment.centerRight,
-            child: pw.Text(
-              'Generated by AttendEase',
-              style:
-                  const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
-            ),
+            child: pw.Text('Generated by AttendEase',
+                style:
+                    const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
           ),
         ],
       ),
@@ -131,14 +95,142 @@ class PdfReportService {
     return doc;
   }
 
+  pw.Widget _header(String title, String rangeText, Duration total) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(18),
+      decoration: const pw.BoxDecoration(
+        color: _brand,
+        borderRadius: pw.BorderRadius.all(pw.Radius.circular(12)),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(title,
+                  style: pw.TextStyle(
+                      color: PdfColors.white,
+                      fontSize: 22,
+                      fontWeight: pw.FontWeight.bold)),
+              pw.Text(rangeText,
+                  style:
+                      const pw.TextStyle(color: PdfColors.white, fontSize: 11)),
+            ],
+          ),
+          pw.SizedBox(height: 12),
+          pw.Text(formatHm(total),
+              style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontSize: 32,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.Text('Total tracked',
+              style: const pw.TextStyle(color: PdfColors.white, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _sectionTitle(String text) => pw.Text(text,
+      style: pw.TextStyle(
+          fontSize: 13,
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.grey800));
+
+  pw.Widget _barChart(List<TimeBucket> buckets) {
+    final maxMs = buckets
+        .map((b) => b.total.inMilliseconds)
+        .fold<int>(1, (a, b) => b > a ? b : a);
+    const chartH = 90.0;
+    return pw.Container(
+      height: chartH + 16,
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: buckets.map((b) {
+          final h = maxMs == 0 ? 0.0 : (b.total.inMilliseconds / maxMs) * chartH;
+          return pw.Expanded(
+            child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              mainAxisAlignment: pw.MainAxisAlignment.end,
+              children: [
+                pw.Container(
+                  width: 11,
+                  height: h < 1 ? 1 : h,
+                  decoration: const pw.BoxDecoration(
+                    color: _brand,
+                    borderRadius: pw.BorderRadius.vertical(
+                        top: pw.Radius.circular(2)),
+                  ),
+                ),
+                pw.SizedBox(height: 4),
+                pw.Text(b.label,
+                    style:
+                        const pw.TextStyle(fontSize: 7, color: PdfColors.grey600)),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  pw.Widget _pie(List<ReportNode> nodes) {
+    return pw.SizedBox(
+      width: 130,
+      height: 130,
+      child: pw.Chart(
+        grid: pw.PieGrid(),
+        datasets: nodes
+            .map((n) => pw.PieDataSet(
+                  value: n.total.inMilliseconds.toDouble(),
+                  color: _colorOf(n),
+                  legend: '',
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  pw.Widget _legend(List<ReportNode> nodes, String Function(Duration) pct) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: nodes.map((n) {
+        return pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 4),
+          child: pw.Row(
+            children: [
+              pw.Container(
+                width: 11,
+                height: 11,
+                decoration: pw.BoxDecoration(
+                    color: _colorOf(n), shape: pw.BoxShape.circle),
+              ),
+              pw.SizedBox(width: 8),
+              pw.Expanded(
+                child: pw.Text(n.label, style: const pw.TextStyle(fontSize: 10)),
+              ),
+              pw.Text(pct(n.total),
+                  style: const pw.TextStyle(
+                      fontSize: 9, color: PdfColors.grey600)),
+              pw.SizedBox(width: 10),
+              pw.Text(formatHm(n.total),
+                  style: pw.TextStyle(
+                      fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   pw.Widget _projectBlock(
       ReportNode project, int totalMs, String Function(Duration) pct) {
     final color = _colorOf(project);
     final fraction = project.total.inMilliseconds / totalMs;
-    // Rounded grey card (uniform decoration — pdf forbids borderRadius on a
-    // one-sided border, and a stretched stripe blows up height in MultiPage).
     return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 12),
+      margin: const pw.EdgeInsets.only(bottom: 10),
       padding: const pw.EdgeInsets.all(12),
       decoration: pw.BoxDecoration(
         color: PdfColors.grey100,
@@ -203,7 +295,6 @@ class PdfReportService {
     );
   }
 
-  /// A rounded progress bar filled [fraction] (0..1) in [color].
   pw.Widget _bar(double fraction, PdfColor color, {double height = 8}) {
     final f = fraction.clamp(0.0, 1.0);
     final filled = (f * 1000).round();
@@ -219,8 +310,7 @@ class PdfReportService {
           if (filled < 1000)
             pw.Expanded(
                 flex: 1000 - filled,
-                child:
-                    pw.Container(height: height, color: PdfColors.grey300)),
+                child: pw.Container(height: height, color: PdfColors.grey300)),
         ],
       ),
     );

@@ -16,8 +16,10 @@ import 'package:window_manager/window_manager.dart';
 import 'package:attend_ease/main.dart' show buildAppTheme;
 import 'package:attend_ease/providers/app_providers.dart';
 import 'package:attend_ease/services/database_service.dart';
+import 'package:attend_ease/models/time_entry.dart';
 import 'package:attend_ease/screens/history_screen.dart';
 import 'package:attend_ease/screens/home_screen.dart';
+import 'package:attend_ease/screens/manual_entry_screen.dart';
 import 'package:attend_ease/screens/projects_screen.dart';
 import 'package:attend_ease/screens/reports_screen.dart';
 import 'package:attend_ease/services/settings_service.dart';
@@ -119,6 +121,16 @@ class _ShotApp extends StatelessWidget {
       'reports' => const ReportsScreen(),
       'history' => const HistoryScreen(),
       'projects' => const ProjectsScreen(),
+      'manual' => ManualEntryScreen(
+          existing: TimeEntry(
+            id: 1,
+            person: 'intishar',
+            taskName: 'Project Test',
+            start: DateTime(2026, 6, 28, 23, 48),
+            end: DateTime(2026, 6, 29, 1, 24),
+            createdAt: DateTime(2026, 6, 28),
+          ),
+        ),
       _ => const HomeScreen(),
     };
     return MaterialApp(

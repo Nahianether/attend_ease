@@ -18,15 +18,28 @@ void main() {
         ],
       ),
       const ReportNode(
+        label: 'প্রবাসী বাংলা', // Bengali — verifies the bundled font
+        total: Duration(hours: 3),
+        color: 0xFF22A565,
+        children: [ReportNode(label: 'ভিডিও এডিটিং', total: Duration(hours: 3))],
+      ),
+      const ReportNode(
         label: 'No project',
         total: Duration(hours: 1),
         children: [ReportNode(label: 'No task', total: Duration(hours: 1))],
       ),
     ];
+    final range = DateRange(DateTime(2026, 6, 22), DateTime(2026, 6, 29));
     final doc = await PdfReportService().build(
       title: 'Time Report',
-      range: DateRange(DateTime(2026, 6, 22), DateTime(2026, 6, 29)),
+      range: range,
       nodes: nodes,
+      daily: const [
+        TimeBucket('22', Duration(hours: 2)),
+        TimeBucket('23', Duration(hours: 4)),
+        TimeBucket('24', Duration(hours: 1)),
+        TimeBucket('25', Duration(hours: 2, minutes: 30)),
+      ],
       total: const Duration(hours: 9, minutes: 30),
     );
     final bytes = await doc.save();

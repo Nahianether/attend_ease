@@ -8,6 +8,17 @@ import '../providers/app_providers.dart';
 import '../widgets/error_handling.dart';
 import '../widgets/project_task_picker.dart';
 
+/// Resolves a manual entry's start/end DateTimes. If the end time is at or
+/// before the start time, the session crosses midnight and the end rolls to the
+/// next day (so 11:48 PM → 1:24 AM is a valid 1h 36m entry).
+(DateTime start, DateTime end) resolveEntryTimes(
+    DateTime date, TimeOfDay startT, TimeOfDay endT) {
+  final start = DateTime(date.year, date.month, date.day, startT.hour, startT.minute);
+  var end = DateTime(date.year, date.month, date.day, endT.hour, endT.minute);
+  if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
+  return (start, end);
+}
+
 // Form state for the date/time fields (null = use the seeded initial value).
 final _manualDateProvider = StateProvider.autoDispose<DateTime?>((_) => null);
 final _manualStartProvider = StateProvider.autoDispose<TimeOfDay?>((_) => null);
@@ -70,19 +81,22 @@ class _ManualEntryScreenState extends ConsumerState<ManualEntryScreen> {
     super.dispose();
   }
 
-  DateTime _combine(DateTime date, TimeOfDay t) =>
-      DateTime(date.year, date.month, date.day, t.hour, t.minute);
+  (DateTime start, DateTime end) _resolve(
+          DateTime date, TimeOfDay startT, TimeOfDay endT) =>
+      resolveEntryTimes(date, startT, endT);
+
+  bool _sameTime(TimeOfDay a, TimeOfDay b) =>
+      a.hour == b.hour && a.minute == b.minute;
 
   Future<void> _save(DateTime date, TimeOfDay startT, TimeOfDay endT) async {
     if (!_formKey.currentState!.validate()) return;
-    final start = _combine(date, startT);
-    final end = _combine(date, endT);
-    if (!end.isAfter(start)) {
+    if (_sameTime(startT, endT)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End time must be after start time.')),
+        const SnackBar(content: Text('Start and end time can\'t be the same.')),
       );
       return;
     }
+    final (start, end) = _resolve(date, startT, endT);
 
     final projectId = ref.read(manualProjectProvider(_initialProjectId));
     final db = ref.read(databaseProvider);
@@ -157,8 +171,11 @@ class _ManualEntryScreenState extends ConsumerState<ManualEntryScreen> {
     final endT = ref.watch(_manualEndProvider) ?? _initialEnd;
 
     final dateFmt = DateFormat('EEE, dd MMM yyyy');
-    final span = _combine(date, endT).difference(_combine(date, startT));
-    final validSpan = span.inMinutes > 0;
+    final sameTime = _sameTime(startT, endT);
+    final (rStart, rEnd) = _resolve(date, startT, endT);
+    final span = rEnd.difference(rStart);
+    final overnight = !sameTime && rEnd.day != rStart.day;
+    final validSpan = !sameTime;
 
     return Scaffold(
       appBar: AppBar(
@@ -256,7 +273,9 @@ class _ManualEntryScreenState extends ConsumerState<ManualEntryScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              validSpan ? 'Duration: ${_fmt(span)}' : 'End must be after start',
+              validSpan
+                  ? 'Duration: ${_fmt(span)}${overnight ? '  ·  ends next day' : ''}'
+                  : "Start and end can't be the same",
               style: TextStyle(
                 color: validSpan
                     ? Theme.of(context).colorScheme.primary

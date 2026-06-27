@@ -119,6 +119,12 @@ lib/
 - Theme is centralised in `_buildTheme` — don't hardcode per-widget radii/colors.
 
 ## Important behaviors (so you don't break them)
+- **Overnight manual entries**: the manual form has one date + start/end times.
+  `resolveEntryTimes()` (top-level in `manual_entry_screen.dart`) rolls the end to
+  the **next day** when end ≤ start, so 11:48 PM → 1:24 AM is a valid 1h 36m entry
+  (UI shows "ends next day"). Only identical start/end is rejected. Tested in
+  `test/manual_entry_test.dart`. (Live START/STOP already handles midnight via
+  real timestamps.)
 - **Timer lives in `SessionNotifier`** (`app_providers.dart`), not the widget. It
   holds a `Timer.periodic` and exposes `SessionState` (running/paused/entry/elapsed).
   Accumulation model: `accumulated` (banked segments) + current segment since
@@ -134,14 +140,19 @@ lib/
 - **Reports aggregate in Dart** over SQL-filtered rows (`entriesInRange`), not
   SQL GROUP BY — needed for live "now" + paused subtraction. Grouping toggles
   between Project→Task and Person→Project.
-- **PDF**: `Printing.sharePdf` (Android share / Windows save) and
-  `Printing.layoutPdf` (print preview). Fonts: `PdfGoogleFonts` fetches Noto Sans
-  + Noto Sans Bengali at build time (full Unicode incl. Bengali) **when online**;
-  offline it falls back to built-in Helvetica (Latin only). Keep PDF text ASCII
-  where possible (e.g. use `-` not `–`) so the offline fallback never throws on a
-  missing glyph. Export is wrapped in `guard()` so any failure shows a dialog.
-  Avoid `borderRadius` on one-sided borders and `CrossAxisAlignment.stretch`
-  rows in `MultiPage` (causes infinite-height layout errors).
+- **PDF** (`pdf_report_service.dart`): Clockify-style — brand header band (title +
+  range + big total), a **daily-activity bar chart** (manual vertical bars from
+  `timeBuckets()` — per day ≤45d, else per month), a **project pie chart**
+  (`pw.Chart`+`PieDataSet`) with a legend (dot/name/%/time), and per-project
+  **breakdown cards** with task bars. Export via `Printing.sharePdf` /
+  `Printing.layoutPdf`, wrapped in `guard()`.
+- **PDF fonts are BUNDLED for offline Unicode incl. Bengali**: `assets/fonts/`
+  NotoSans-Regular/Bold + NotoSansBengali-Regular, declared in pubspec `assets:`,
+  loaded via `rootBundle` → `pw.ThemeData.withFont(base, bold, fontFallback:[bengali])`.
+  Keep PDF chrome text ASCII (`-` not `–`); user-typed names render via the fonts.
+  Avoid `borderRadius` on one-sided borders and `CrossAxisAlignment.stretch` rows
+  in `MultiPage` (infinite-height errors). `test/pdf_test.dart` builds a report
+  with a Bengali name as a regression check.
 - **WhatsApp open** (`_openWhatsApp`): `whatsapp://send` first (app/desktop),
   `wa.me` browser fallback.
 
