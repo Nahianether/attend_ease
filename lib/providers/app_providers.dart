@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
@@ -33,10 +34,25 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
     final cur = state.asData?.value ?? const AppSettings();
     await save(cur.copyWith(defaultUserName: name.trim()));
   }
+
+  Future<void> setThemeMode(String mode) async {
+    final cur = state.asData?.value ?? const AppSettings();
+    await save(cur.copyWith(themeMode: mode));
+  }
 }
 
 final settingsProvider =
     AsyncNotifierProvider<SettingsNotifier, AppSettings>(SettingsNotifier.new);
+
+/// The active [ThemeMode], derived from saved settings (defaults to system).
+final themeModeProvider = Provider<ThemeMode>((ref) {
+  final mode = ref.watch(settingsProvider).asData?.value.themeMode ?? 'system';
+  return switch (mode) {
+    'light' => ThemeMode.light,
+    'dark' => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
+});
 
 // ---- Projects & Tasks ----------------------------------------------------
 

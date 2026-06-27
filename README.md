@@ -41,11 +41,9 @@ account, server, or cloud.
 
 ## 📸 Screenshots
 
-> Add your screenshots to a `docs/` folder and they'll show up here.
-
-| Home / Timer | Reports | PDF export |
+| Home / Timer | Reports | History |
 |---|---|---|
-| ![Home](docs/home.png) | ![Reports](docs/reports.png) | ![PDF](docs/report.png) |
+| ![Home](docs/home.png) | ![Reports](docs/reports.png) | ![History](docs/history.png) |
 
 ---
 

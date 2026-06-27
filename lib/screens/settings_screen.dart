@@ -28,9 +28,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     try {
+      // Preserve the theme (changed live via its own control).
+      final current = ref.read(settingsProvider).asData?.value;
       await ref.read(settingsProvider.notifier).save(AppSettings(
             defaultUserName: _name.text.trim(),
             managerWhatsApp: _managerWhatsApp.text.trim(),
+            themeMode: current?.themeMode ?? 'system',
           ));
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -98,6 +101,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const Text(
                   'Digits only, including country code. On check-in/out, '
                   'WhatsApp opens pre-filled — you tap Send.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                _section('Appearance'),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                        value: 'system',
+                        label: Text('System'),
+                        icon: Icon(Icons.brightness_auto)),
+                    ButtonSegment(
+                        value: 'light',
+                        label: Text('Light'),
+                        icon: Icon(Icons.light_mode_outlined)),
+                    ButtonSegment(
+                        value: 'dark',
+                        label: Text('Dark'),
+                        icon: Icon(Icons.dark_mode_outlined)),
+                  ],
+                  selected: {s.themeMode},
+                  onSelectionChanged: (sel) => ref
+                      .read(settingsProvider.notifier)
+                      .setThemeMode(sel.first),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Applies instantly. "System" follows your device theme.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 24),

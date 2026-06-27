@@ -22,11 +22,20 @@ class HistoryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final entriesAsync = ref.watch(historyProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
-      floatingActionButton: FloatingActionButton.extended(
+      appBar: AppBar(
+        title: const Text('History'),
+        actions: [
+          IconButton(
+            tooltip: 'Add entry',
+            icon: const Icon(Icons.add),
+            onPressed: () => _openEditor(context),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
         onPressed: () => _openEditor(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Entry'),
+        tooltip: 'Add entry',
+        child: const Icon(Icons.add),
       ),
       body: entriesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -37,6 +46,7 @@ class HistoryScreen extends ConsumerWidget {
             return const Center(child: Text('No time entries yet.'));
           }
           return ListView.separated(
+            padding: const EdgeInsets.only(bottom: 88),
             itemCount: views.length,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, i) {

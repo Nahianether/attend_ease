@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'providers/app_providers.dart';
 import 'screens/home_screen.dart';
 import 'widgets/error_handling.dart';
 
@@ -48,11 +49,12 @@ class _DragScrollBehavior extends MaterialScrollBehavior {
 
 const _seed = Color(0xFF2E6BE6);
 
-class AttendEaseApp extends StatelessWidget {
+class AttendEaseApp extends ConsumerWidget {
   const AttendEaseApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
       title: 'AttendEase',
       debugShowCheckedModeBanner: false,
@@ -60,6 +62,7 @@ class AttendEaseApp extends StatelessWidget {
       scrollBehavior: _DragScrollBehavior(),
       theme: buildAppTheme(Brightness.light),
       darkTheme: buildAppTheme(Brightness.dark),
+      themeMode: themeMode,
       home: const HomeScreen(),
     );
   }

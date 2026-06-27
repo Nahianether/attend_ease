@@ -92,6 +92,21 @@ lib/
     settings_screen.dart          Your name + manager WhatsApp
 ```
 
+## Theming
+- Light / Dark / **System** (default) — persisted in settings (`AppSettings.themeMode`,
+  string `'system'|'light'|'dark'`). `themeModeProvider` derives the `ThemeMode`;
+  the root `MaterialApp` (a `ConsumerWidget`) applies it. Changed live from
+  **Settings → Appearance** (`SettingsNotifier.setThemeMode`). `_save` must
+  preserve `themeMode` (it's toggled separately).
+
+## Screenshots
+- README images live in `docs/` (`home.png`, `reports.png`, `history.png`).
+- Regenerate with the throwaway harness: `tool/screenshot_app.dart` seeds an
+  in-memory DB + sample data and shows one screen via `--dart-define=SHOT=...`;
+  `tool/grab.ps1` captures the window client area to PNG. Example:
+  `flutter build windows --release -t tool/screenshot_app.dart --dart-define=SHOT=reports`
+  then run the exe and `pwsh tool/grab.ps1 -Out docs/reports.png`.
+
 ## Error handling & UI conventions
 - **All user actions are guarded.** DB writes / check-in/out / save / delete /
   PDF export are wrapped (try/catch or `guard()`); failures show `showAppError`
