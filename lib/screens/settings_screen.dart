@@ -1,177 +1,115 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../providers/app_providers.dart';
 import '../services/settings_service.dart';
+import '../widgets/error_handling.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
-  final _service = SettingsService();
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _formKey = GlobalKey<FormState>();
-
-  final _managerEmail = TextEditingController();
+  final _name = TextEditingController();
   final _managerWhatsApp = TextEditingController();
-  final _smtpHost = TextEditingController();
-  final _smtpPort = TextEditingController();
-  final _smtpUser = TextEditingController();
-  final _smtpPass = TextEditingController();
-
-  bool _loading = true;
-  bool _obscurePass = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final s = await _service.load();
-    _managerEmail.text = s.managerEmail;
-    _managerWhatsApp.text = s.managerWhatsApp;
-    _smtpHost.text = s.smtpHost;
-    _smtpPort.text = s.smtpPort.toString();
-    _smtpUser.text = s.smtpUsername;
-    _smtpPass.text = s.smtpPassword;
-    if (mounted) setState(() => _loading = false);
-  }
+  bool _seeded = false;
 
   @override
   void dispose() {
-    _managerEmail.dispose();
+    _name.dispose();
     _managerWhatsApp.dispose();
-    _smtpHost.dispose();
-    _smtpPort.dispose();
-    _smtpUser.dispose();
-    _smtpPass.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    final s = AppSettings(
-      managerEmail: _managerEmail.text.trim(),
-      managerWhatsApp: _managerWhatsApp.text.trim(),
-      smtpHost: _smtpHost.text.trim().isEmpty
-          ? 'smtp.gmail.com'
-          : _smtpHost.text.trim(),
-      smtpPort: int.tryParse(_smtpPort.text.trim()) ?? 587,
-      smtpUsername: _smtpUser.text.trim(),
-      smtpPassword: _smtpPass.text,
-    );
-    await _service.save(s);
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Settings saved')));
-      Navigator.pop(context);
+    try {
+      await ref.read(settingsProvider.notifier).save(AppSettings(
+            defaultUserName: _name.text.trim(),
+            managerWhatsApp: _managerWhatsApp.text.trim(),
+          ));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Settings saved')));
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        await showAppError(context, title: 'Could not save settings', error: e);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
+    final settingsAsync = ref.watch(settingsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _section('Project Manager — who gets notified'),
-            TextFormField(
-              controller: _managerEmail,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Manager email',
-                hintText: 'manager@company.com',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _managerWhatsApp,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Manager WhatsApp (with country code)',
-                hintText: 'e.g. 8801712345678',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 24),
-            _section('Sending account — used to send the email automatically'),
-            const Text(
-              'For Gmail: turn on 2-Step Verification, then create an '
-              '"App password" and paste it below (not your normal password).',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _smtpUser,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Sending email address',
-                hintText: 'youraccount@gmail.com',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _smtpPass,
-              obscureText: _obscurePass,
-              decoration: InputDecoration(
-                labelText: 'App password',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: Icon(_obscurePass
-                      ? Icons.visibility
-                      : Icons.visibility_off),
-                  onPressed: () =>
-                      setState(() => _obscurePass = !_obscurePass),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
+      body: settingsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) =>
+            ErrorView(error: e, onRetry: () => ref.invalidate(settingsProvider)),
+        data: (s) {
+          if (!_seeded) {
+            _seeded = true;
+            _name.text = s.defaultUserName;
+            _managerWhatsApp.text = s.managerWhatsApp;
+          }
+          return Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: _smtpHost,
-                    decoration: const InputDecoration(
-                      labelText: 'SMTP host',
-                      border: OutlineInputBorder(),
-                    ),
+                _section('You'),
+                TextFormField(
+                  controller: _name,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Your full name',
+                    hintText: 'e.g. Rahim Uddin',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Please enter your name'
+                      : null,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Used to tag every time entry. Asked once on first launch; '
+                  'change it here anytime.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                _section('Manager — who gets notified'),
+                TextFormField(
+                  controller: _managerWhatsApp,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Manager WhatsApp (with country code)',
+                    hintText: 'e.g. 8801712345678',
+                    border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _smtpPort,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Digits only, including country code. On check-in/out, '
+                  'WhatsApp opens pre-filled — you tap Send.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save),
+                  label: const Text('Save settings'),
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save),
-              label: const Text('Save settings'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

@@ -1,237 +1,188 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/attendance_record.dart';
+import '../models/time_entry.dart';
+import '../providers/app_providers.dart';
 import '../services/attendance_stats.dart';
-import '../services/database_service.dart';
 import '../services/notification_service.dart';
 import '../services/settings_service.dart';
+import '../widgets/error_handling.dart';
+import '../widgets/project_task_picker.dart';
 import 'history_screen.dart';
+import 'projects_screen.dart';
+import 'reports_screen.dart';
 import 'settings_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final _db = DatabaseService.instance;
-  final _settingsService = SettingsService();
-  final _notifier = NotificationService();
-
-  AppSettings _settings = const AppSettings();
-  bool _busy = false;
-
-  // Running session state. Elapsed is accumulated across active segments so
-  // that pausing freezes the clock and resuming continues it.
-  bool _running = false;
-  bool _paused = false;
-  String _currentName = '';
-  Duration _accumulated = Duration.zero; // time from completed segments
-  DateTime? _segmentStart; // start of the current active segment (null = paused)
-  Duration _elapsed = Duration.zero; // what the UI shows
-  Timer? _ticker;
-
-  // Completed check-in/out totals per person for today (live time added in UI).
-  Map<String, Duration> _todayTotals = const {};
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _bootstrapped = false;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
   }
 
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _init() async {
-    final s = await _settingsService.load();
+  Future<void> _bootstrap() async {
+    if (_bootstrapped) return;
+    _bootstrapped = true;
+    final s = await ref.read(settingsProvider.future);
     if (!mounted) return;
-    setState(() => _settings = s);
-
-    // Resume a session if the last record for the saved user is a check-in
-    // that was never checked out (e.g. app was closed mid-session).
-    if (s.defaultUserName.isNotEmpty) {
-      final last = await _db.lastForName(s.defaultUserName);
-      if (mounted && last != null && last.isCheckIn) {
-        _beginTicking(last.name, last.timestamp);
-      }
-    }
-    await _refreshTotals();
-  }
-
-  Future<void> _refreshTotals() async {
-    final records = await _db.recordsForDay(DateTime.now());
-    if (mounted) setState(() => _todayTotals = completedTotals(records));
-  }
-
-  Future<void> _reloadSettings() async {
-    final s = await _settingsService.load();
-    if (mounted) setState(() => _settings = s);
-  }
-
-  void _beginTicking(String name, DateTime start) {
-    _ticker?.cancel();
-    setState(() {
-      _running = true;
-      _paused = false;
-      _currentName = name;
-      _accumulated = Duration.zero;
-      _segmentStart = start;
-      _elapsed = DateTime.now().difference(start);
-    });
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-  }
-
-  void _tick() {
-    if (!mounted || _paused || _segmentStart == null) return;
-    setState(() {
-      _elapsed = _accumulated + DateTime.now().difference(_segmentStart!);
-    });
-  }
-
-  void _togglePause() {
-    if (!_running) return;
-    setState(() {
-      if (_paused) {
-        // Resume: start a new active segment from now.
-        _segmentStart = DateTime.now();
-        _paused = false;
-      } else {
-        // Pause: bank the current segment and freeze the clock.
-        if (_segmentStart != null) {
-          _accumulated += DateTime.now().difference(_segmentStart!);
-        }
-        _segmentStart = null;
-        _paused = true;
-        _elapsed = _accumulated;
-      }
-    });
-  }
-
-  void _stopTicking() {
-    _ticker?.cancel();
-    _ticker = null;
-    setState(() {
-      _running = false;
-      _paused = false;
-      _segmentStart = null;
-      _accumulated = Duration.zero;
-      _elapsed = Duration.zero;
-      _currentName = '';
-    });
-  }
-
-  Future<void> _onMainButton() async {
-    if (_busy) return;
-    if (_running) {
-      await _checkOut();
+    if (s.needsOnboarding) {
+      await _onboard();
     } else {
-      await _checkIn();
+      await ref.read(sessionProvider.notifier).resumeIfAny(s.defaultUserName);
     }
   }
 
-  Future<void> _checkIn() async {
-    final name = await _askName();
-    if (name == null || name.trim().isEmpty) return;
-    final trimmed = name.trim();
-
-    setState(() => _busy = true);
-    try {
-      final now = DateTime.now();
-      final saved = await _db.insert(AttendanceRecord(
-        name: trimmed,
-        type: 'in',
-        timestamp: now,
-      ));
-
-      if (_settings.defaultUserName != trimmed) {
-        _settings = _settings.copyWith(defaultUserName: trimmed);
-        await _settingsService.save(_settings);
-      }
-
-      final result = await _notifier.notify(saved, _settings);
-      _beginTicking(trimmed, now);
-      await _refreshTotals();
-      if (mounted) _showOutcome(saved, result);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _checkOut() async {
-    setState(() => _busy = true);
-    try {
-      final saved = await _db.insert(AttendanceRecord(
-        name: _currentName,
-        type: 'out',
-        timestamp: DateTime.now(),
-      ));
-      final worked = _elapsed;
-      final result = await _notifier.notify(saved, _settings);
-      _stopTicking();
-      await _refreshTotals();
-      if (mounted) _showOutcome(saved, result, worked: worked);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<String?> _askName() {
-    final controller = TextEditingController(text: _settings.defaultUserName);
-    return showDialog<String>(
+  Future<void> _onboard() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Who are you?'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Your name',
-            hintText: 'e.g. Rahim Uddin',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) => Navigator.pop(ctx, v),
+        title: const Text('Welcome to AttendEase'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('What is your full name?'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Your name',
+                hintText: 'e.g. Rahim Uddin',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Start'),
+            child: const Text('Continue'),
           ),
         ],
       ),
     );
+    if (name == null || name.trim().isEmpty) {
+      if (mounted) await _onboard(); // re-ask until we have a name
+      return;
+    }
+    await ref.read(settingsProvider.notifier).setName(name.trim());
   }
 
-  void _showOutcome(AttendanceRecord r, NotifyResult res, {Duration? worked}) {
-    final action = r.isCheckIn ? 'Checked in' : 'Checked out';
-    final lines = <String>['$action: ${r.name}'];
-    if (worked != null) {
-      lines.add('Worked: ${_fmt(worked)}');
+  Future<void> _onMainButton(AppSettings settings, bool running) async {
+    if (ref.read(homeBusyProvider)) return;
+    if (settings.needsOnboarding) {
+      await _onboard();
+      return;
     }
-    if (res.emailAttempted) {
-      lines.add(res.emailSent
-          ? '✓ Email sent to manager'
-          : '✗ Email failed: ${_short(res.emailError)}');
+    if (running) {
+      await _checkOut();
     } else {
-      lines.add('• Email not configured (Settings)');
+      await _checkIn(settings.defaultUserName);
     }
-    lines.add(res.whatsAppOpened
-        ? '✓ WhatsApp opened — tap Send'
-        : '• WhatsApp not configured (Settings)');
+  }
 
+  Future<void> _checkIn(String name) async {
+    final sel = await showStartSheet(context, ref);
+    if (sel == null) return;
+
+    ref.read(homeBusyProvider.notifier).state = true;
+    try {
+      final entry = await ref.read(sessionProvider.notifier).start(
+            person: name,
+            projectId: sel.projectId,
+            taskName: sel.taskName,
+            description: sel.description,
+          );
+      ref.invalidate(todayTotalsProvider);
+      final result = await ref.read(notificationServiceProvider).notify(
+            settings: ref.read(settingsProvider).asData?.value ??
+                const AppSettings(),
+            person: name,
+            isCheckIn: true,
+            when: entry.start,
+            projectName: await _projectName(entry.projectId),
+            taskName: entry.taskName,
+            description: sel.description,
+          );
+      if (mounted) _showOutcome(name: name, isCheckIn: true, res: result);
+    } catch (e) {
+      if (mounted) {
+        await showAppError(context, title: 'Could not check in', error: e);
+      }
+    } finally {
+      if (mounted) ref.read(homeBusyProvider.notifier).state = false;
+    }
+  }
+
+  Future<void> _checkOut() async {
+    ref.read(homeBusyProvider.notifier).state = true;
+    try {
+      final result = await ref.read(sessionProvider.notifier).stop();
+      if (result == null) return;
+      ref.invalidate(todayTotalsProvider);
+      ref.invalidate(historyProvider);
+      ref.invalidate(reportEntriesProvider);
+      final entry = result.entry;
+      final notif = await ref.read(notificationServiceProvider).notify(
+            settings: ref.read(settingsProvider).asData?.value ??
+                const AppSettings(),
+            person: entry.person,
+            isCheckIn: false,
+            when: entry.end!,
+            projectName: await _projectName(entry.projectId),
+            taskName: entry.taskName,
+            description: entry.description,
+          );
+      if (mounted) {
+        _showOutcome(
+            name: entry.person,
+            isCheckIn: false,
+            res: notif,
+            worked: result.worked);
+      }
+    } catch (e) {
+      if (mounted) {
+        await showAppError(context, title: 'Could not check out', error: e);
+      }
+    } finally {
+      if (mounted) ref.read(homeBusyProvider.notifier).state = false;
+    }
+  }
+
+  Future<String?> _projectName(int? projectId) async {
+    if (projectId == null) return null;
+    return (await ref.read(databaseProvider).getProject(projectId))?.name;
+  }
+
+  void _showOutcome(
+      {required String name,
+      required bool isCheckIn,
+      required NotifyResult res,
+      Duration? worked}) {
+    final action = isCheckIn ? 'Checked in' : 'Checked out';
+    final lines = <String>['$action: $name'];
+    if (worked != null) lines.add('Worked: ${formatHms(worked)}');
+    if (res.whatsAppConfigured) {
+      lines.add(res.whatsAppOpened
+          ? '✓ WhatsApp opened — tap Send'
+          : '✗ Could not open WhatsApp');
+    } else {
+      lines.add('• Manager WhatsApp not set (Settings)');
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -247,108 +198,195 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  String _fmt(Duration d) {
-    final h = d.inHours.toString().padLeft(2, '0');
-    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-    return '$h:$m:$s';
-  }
-
-  String _short(String? e) {
-    if (e == null) return 'unknown error';
-    return e.length > 120 ? '${e.substring(0, 120)}…' : e;
+  void _openScreen(Widget screen) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 
   @override
   Widget build(BuildContext context) {
+    final settings =
+        ref.watch(settingsProvider).asData?.value ?? const AppSettings();
+    final session = ref.watch(sessionProvider);
+    final busy = ref.watch(homeBusyProvider);
+    final todayTotals =
+        ref.watch(todayTotalsProvider).asData?.value ?? const {};
+    final name = settings.defaultUserName;
     final now = DateFormat('EEEE, dd MMMM yyyy').format(DateTime.now());
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AttendEase'),
         actions: [
           IconButton(
-            tooltip: 'History',
-            icon: const Icon(Icons.history),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HistoryScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings),
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-              _reloadSettings();
-            },
+            tooltip: 'Reports',
+            icon: const Icon(Icons.bar_chart),
+            onPressed: () => _openScreen(const ReportsScreen()),
           ),
         ],
       ),
+      drawer: _NavDrawer(
+        name: name,
+        onHistory: () => _openScreen(const HistoryScreen()),
+        onProjects: () => _openScreen(const ProjectsScreen()),
+        onReports: () => _openScreen(const ReportsScreen()),
+        onSettings: () => _openScreen(const SettingsScreen()),
+      ),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(now, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 24),
-              if (_running) ...[
+              const SizedBox(height: 16),
+              if (session.running) ...[
                 Text(
-                  _paused ? 'Paused — $_currentName' : 'Working — $_currentName',
+                  session.paused ? 'Paused — $name' : 'Working — $name',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
+                _EntryTagLine(entry: session.entry),
                 const SizedBox(height: 8),
                 Text(
-                  _fmt(_elapsed),
+                  formatHms(session.elapsed),
                   style: Theme.of(context).textTheme.displayMedium?.copyWith(
                         fontWeight: FontWeight.bold,
-                        color: _paused
+                        color: session.paused
                             ? Colors.orange
                             : Theme.of(context).colorScheme.primary,
                       ),
                 ),
                 const SizedBox(height: 24),
               ] else
-                const SizedBox(height: 40),
+                const SizedBox(height: 32),
               _MainButton(
-                running: _running,
-                busy: _busy,
-                onTap: _onMainButton,
+                running: session.running,
+                busy: busy,
+                onTap: () => _onMainButton(settings, session.running),
               ),
-              if (_running) ...[
+              if (session.running) ...[
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : _togglePause,
-                  icon: Icon(_paused ? Icons.play_arrow : Icons.pause),
-                  label: Text(_paused ? 'Resume' : 'Pause'),
+                  onPressed: busy
+                      ? null
+                      : () => ref.read(sessionProvider.notifier).togglePause(),
+                  icon: Icon(session.paused ? Icons.play_arrow : Icons.pause),
+                  label: Text(session.paused ? 'Resume' : 'Pause'),
                 ),
               ],
               const SizedBox(height: 24),
               _TodayPanel(
-                totals: _todayTotals,
-                liveName: _running ? _currentName : null,
-                liveDuration: _elapsed,
+                totals: todayTotals,
+                liveName: session.running ? name : null,
+                liveDuration: session.elapsed,
               ),
               const SizedBox(height: 16),
-              if (!_running &&
-                  !_settings.emailConfigured &&
-                  !_settings.whatsAppConfigured)
+              if (!session.running && !settings.whatsAppConfigured)
                 _ConfigHint(
-                  onOpenSettings: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const SettingsScreen()),
-                    );
-                    _reloadSettings();
-                  },
-                ),
+                    onOpenSettings: () => _openScreen(const SettingsScreen())),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EntryTagLine extends StatelessWidget {
+  final TimeEntry? entry;
+  const _EntryTagLine({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    if (e == null) return const SizedBox.shrink();
+    final parts = [
+      if (e.taskName.isNotEmpty) e.taskName,
+      if (e.description.isNotEmpty) e.description,
+    ];
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Text(
+        parts.join(' · '),
+        style: Theme.of(context).textTheme.bodySmall,
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+}
+
+class _NavDrawer extends StatelessWidget {
+  final String name;
+  final VoidCallback onHistory;
+  final VoidCallback onProjects;
+  final VoidCallback onReports;
+  final VoidCallback onSettings;
+
+  const _NavDrawer({
+    required this.name,
+    required this.onHistory,
+    required this.onProjects,
+    required this.onReports,
+    required this.onSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const Icon(Icons.access_time_filled, size: 36),
+                const SizedBox(height: 8),
+                Text('AttendEase',
+                    style: Theme.of(context).textTheme.titleLarge),
+                if (name.isNotEmpty)
+                  Text(name, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: const Text('Projects'),
+            onTap: () {
+              Navigator.pop(context);
+              onProjects();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bar_chart),
+            title: const Text('Reports'),
+            onTap: () {
+              Navigator.pop(context);
+              onReports();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('History'),
+            onTap: () {
+              Navigator.pop(context);
+              onHistory();
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Settings'),
+            onTap: () {
+              Navigator.pop(context);
+              onSettings();
+            },
+          ),
+        ],
       ),
     );
   }
@@ -415,7 +453,7 @@ class _MainButton extends StatelessWidget {
 
 class _TodayPanel extends StatelessWidget {
   final Map<String, Duration> totals;
-  final String? liveName; // person currently checked in (their live time added)
+  final String? liveName;
   final Duration liveDuration;
 
   const _TodayPanel({
@@ -426,7 +464,6 @@ class _TodayPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Merge completed totals with the live session of whoever is checked in.
     final merged = Map<String, Duration>.from(totals);
     if (liveName != null && liveName!.isNotEmpty) {
       merged[liveName!] = (merged[liveName!] ?? Duration.zero) + liveDuration;
@@ -471,8 +508,7 @@ class _TodayPanel extends StatelessWidget {
                     ),
                     Text(
                       formatHm(e.value),
-                      style:
-                          const TextStyle(fontWeight: FontWeight.bold),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -498,7 +534,7 @@ class _ConfigHint extends StatelessWidget {
         child: Column(
           children: [
             const Text(
-              'No manager contact set yet.\nAdd email / WhatsApp so check-ins get sent.',
+              "No manager WhatsApp set yet.\nAdd it so check-ins get sent.",
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),

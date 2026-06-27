@@ -1,90 +1,93 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/attendance_record.dart';
-import '../services/database_service.dart';
+import '../models/time_entry.dart';
+import '../providers/app_providers.dart';
+import '../services/attendance_stats.dart';
+import '../widgets/error_handling.dart';
+import 'manual_entry_screen.dart';
 
-class HistoryScreen extends StatefulWidget {
+class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
 
-  @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  final _db = DatabaseService.instance;
-  late Future<List<AttendanceRecord>> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _db.getAll();
-  }
-
-  void _reload() => setState(() => _future = _db.getAll());
-
-  Future<void> _confirmDelete(AttendanceRecord r) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete record?'),
-        content: Text('${r.name} — ${r.isCheckIn ? 'in' : 'out'}'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
-        ],
-      ),
+  void _openEditor(BuildContext context, [TimeEntry? entry]) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ManualEntryScreen(existing: entry)),
     );
-    if (ok == true && r.id != null) {
-      await _db.delete(r.id!);
-      _reload();
-    }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entriesAsync = ref.watch(historyProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Attendance History')),
-      body: FutureBuilder<List<AttendanceRecord>>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final records = snap.data ?? [];
-          if (records.isEmpty) {
-            return const Center(
-              child: Text('No attendance records yet.'),
-            );
+      appBar: AppBar(title: const Text('History')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openEditor(context),
+        icon: const Icon(Icons.add),
+        label: const Text('Entry'),
+      ),
+      body: entriesAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) =>
+            ErrorView(error: e, onRetry: () => ref.invalidate(historyProvider)),
+        data: (views) {
+          if (views.isEmpty) {
+            return const Center(child: Text('No time entries yet.'));
           }
           return ListView.separated(
-            itemCount: records.length,
+            itemCount: views.length,
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, i) {
-              final r = records[i];
+              final v = views[i];
+              final e = v.entry;
+              final color = v.projectColor != null
+                  ? Color(v.projectColor!)
+                  : Theme.of(context).colorScheme.surfaceContainerHighest;
+              final tag = [
+                if (v.projectName != null) v.projectName!,
+                if (v.taskName != null) v.taskName!,
+              ].join(' · ');
+              final timeRange = e.isRunning
+                  ? '${DateFormat('dd MMM, hh:mm a').format(e.start)} → running'
+                  : '${DateFormat('dd MMM, hh:mm a').format(e.start)} – '
+                      '${DateFormat('hh:mm a').format(e.end!)}';
               return ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: r.isCheckIn
-                      ? Colors.green.shade100
-                      : Colors.orange.shade100,
-                  child: Icon(
-                    r.isCheckIn ? Icons.login : Icons.logout,
-                    color: r.isCheckIn ? Colors.green : Colors.orange,
+                  backgroundColor: color,
+                  child: Text(
+                    e.person.isNotEmpty ? e.person[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white),
                   ),
                 ),
-                title: Text(r.name),
-                subtitle: Text(
-                  '${r.isCheckIn ? 'Checked in' : 'Checked out'} • '
-                  '${DateFormat('dd MMM yyyy, hh:mm a').format(r.timestamp)}',
+                title: Row(
+                  children: [
+                    Expanded(child: Text(e.person)),
+                    Text(
+                      e.isRunning ? '• live' : formatHm(e.worked()),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: e.isRunning
+                            ? Colors.green
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
                 ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => _confirmDelete(r),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (tag.isNotEmpty) Text(tag),
+                    if (e.description.isNotEmpty)
+                      Text(e.description,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(timeRange,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
                 ),
+                isThreeLine: tag.isNotEmpty || e.description.isNotEmpty,
+                onTap: () => _openEditor(context, e),
               );
             },
           );

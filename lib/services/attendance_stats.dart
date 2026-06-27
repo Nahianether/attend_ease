@@ -1,25 +1,15 @@
-import '../models/attendance_record.dart';
+import '../models/time_entry.dart';
 
-/// Sums the duration of *completed* check-in → check-out pairs per person for
-/// the given records (assumed to be a single day, sorted oldest first).
-///
-/// A trailing check-in with no matching check-out is treated as an ongoing
-/// session and is NOT counted here — the live timer on the home screen adds
-/// that person's running time on top.
-Map<String, Duration> completedTotals(List<AttendanceRecord> records) {
+/// Sums worked time per person from a list of time entries. Running entries
+/// contribute their live time up to [now] (paused time already excluded by
+/// [TimeEntry.worked]).
+Map<String, Duration> dailyTotalsByPerson(
+  List<TimeEntry> entries,
+  DateTime now,
+) {
   final totals = <String, Duration>{};
-  final openSince = <String, DateTime>{};
-
-  for (final r in records) {
-    if (r.isCheckIn) {
-      openSince[r.name] = r.timestamp;
-    } else {
-      final start = openSince.remove(r.name);
-      if (start != null) {
-        totals[r.name] = (totals[r.name] ?? Duration.zero) +
-            r.timestamp.difference(start);
-      }
-    }
+  for (final e in entries) {
+    totals[e.person] = (totals[e.person] ?? Duration.zero) + e.worked(now);
   }
   return totals;
 }
@@ -29,4 +19,12 @@ String formatHm(Duration d) {
   final h = d.inHours;
   final m = d.inMinutes % 60;
   return '${h}h ${m.toString().padLeft(2, '0')}m';
+}
+
+/// Formats a duration as `H:MM:SS` (live timer style).
+String formatHms(Duration d) {
+  final h = d.inHours.toString().padLeft(2, '0');
+  final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+  final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+  return '$h:$m:$s';
 }
